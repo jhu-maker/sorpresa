@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Para ti</title>
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  #a{position:fixed;top:0;margin:0;color:#fff;font-family:'Courier New',Courier,monospace;font-weight:bold;white-space:pre;letter-spacing:0}
+  #pr{position:absolute;visibility:hidden;white-space:pre;font-family:'Courier New',Courier,monospace;font-weight:bold}
+  #msg{position:fixed;top:5vh;left:0;right:0;text-align:center;color:#fff;
+    font:500 clamp(28px,6vw,56px)/1.2 'Dancing Script','Segoe Script',cursive;
+    opacity:0;transition:opacity 3s ease;text-shadow:0 0 18px rgba(255,170,200,.6);pointer-events:none;padding:0 16px}
+  #msg.on{opacity:1}
+  #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+    background:rgba(0,0,0,.5);color:#fff;cursor:pointer;transition:opacity 1s;z-index:5;
+    font:500 clamp(26px,5vw,42px) 'Dancing Script','Segoe Script',cursive}
+  #start button{font:inherit;font-size:.6em;color:#fff;background:transparent;border:1px solid rgba(255,255,255,.6);
+    border-radius:40px;padding:10px 34px;cursor:pointer}
+  #start button:hover,#start button:focus-visible{background:rgba(255,255,255,.14);outline:none}
+  #start.off{opacity:0;pointer-events:none}
+  .ctl{position:fixed;bottom:16px;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.4);
+    background:rgba(0,0,0,.4);color:#fff;font-size:20px;cursor:pointer;z-index:4;opacity:.65}
+  .ctl:hover,.ctl:focus-visible{opacity:1;outline:none}
+  #mus{right:16px}#rep{right:70px}
+</style>
+</head>
+<body>
+<pre id="a"></pre><span id="pr"></span>
+<div id="msg"></div>
+<div id="start"><span>Una sorpresa para ti</span><button>Comenzar</button></div>
+<button class="ctl" id="rep" title="Repetir" aria-label="Repetir">↻</button>
+<button class="ctl" id="mus" title="Música" aria-label="Música">♪</button>
+<audio id="aud" src="lovers_rock.mp3" loop preload="auto"></audio>
+
+<script>
+/* Cambia aquí el mensaje que aparece al final */
+const DEDICATORIA = "pa que veas que te quiero mas de lo que crees";
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => 1 - Math.pow(1 - t, 3);
+const easeIO = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+const pop = t => 1 + 2.70158*Math.pow(t-1, 3) + 1.70158*Math.pow(t-1, 2);
+const ob = (b, st, d) => easeIO(clamp((b - st)/d));
+const mul = (a, b) => { const r = []; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+  r.push(a[i*3]*b[j] + a[i*3+1]*b[3+j] + a[i*3+2]*b[6+j]); return r; };
+const rx = a => [1,0,0, 0,Math.cos(a),-Math.sin(a), 0,Math.sin(a),Math.cos(a)];
+const ry = a => [Math.cos(a),0,Math.sin(a), 0,1,0, -Math.sin(a),0,Math.cos(a)];
+const rz = a => [Math.cos(a),-Math.sin(a),0, Math.sin(a),Math.cos(a),0, 0,0,1];
+const I3 = [1,0,0, 0,1,0, 0,0,1];
+
+const pre = document.getElementById('a'), pr = document.getElementById('pr');
+const aud = document.getElementById('aud'), msg = document.getElementById('msg');
+const RAMP = ' .:-=+*#%@', D = 1100, YC = 220, LX = -.45, LY = .65, LZ = -.62;
+let W, H, fs, cw, cols, rows, gx0, SC, PY, BY;
+let zb, ci, cr, cg, cb, hk, ha, starAt, stars = [], stems = [], blades = [], heads = [];
+let T0 = null, started = false, WR = I3, LM = I3, LP = [0,0,0], CS = 1, EM = 0, TW = 10, TR = 16;
+let COLR = 255, COLG = 255, COLB = 255;
+
+const F = [
+  [0,400,1.2,[215,35,45]],   [-105,345,1.05,[238,200,50]], [110,350,1.05,[240,205,60]],
+  [-190,285,1.1,[205,65,175]], [200,290,1.0,[120,20,45]],  [-30,290,1.15,[242,228,205]],
+  [95,265,1.0,[242,165,115]], [-230,205,1.0,[238,200,50]], [235,210,1.0,[150,25,45]],
+  [-120,215,1.05,[240,135,175]], [130,195,1.05,[246,218,228]]
+];
+const STEM_T = 2.4, BLOOM_T = 4.4;
+
+function build() {
+  W = innerWidth; H = innerHeight;
+  fs = Math.max(6, Math.min(14, Math.round(Math.sqrt(W*H/14000))));
+  pre.style.fontSize = pr.style.fontSize = fs + 'px'; pre.style.lineHeight = fs + 'px';
+  pr.textContent = 'M'.repeat(100); cw = pr.getBoundingClientRect().width/100;
+  cols = Math.floor(W/cw); rows = Math.floor(H/fs); gx0 = (W - cols*cw)/2; pre.style.left = gx0 + 'px';
+  SC = Math.min(W/760, H/780); BY = H*.93; PY = BY - YC*SC;
+  const n = cols*rows;
+  zb = new Float32Array(n); ci = new Uint8Array(n); cr = new Uint8Array(n); cg = new Uint8Array(n); cb = new Uint8Array(n);
+  hk = new Uint16Array(n); ha = new Float32Array(n); starAt = new Float32Array(n).fill(-1);
+  stars = []; for (let i = 0; i < n*.012; i++) { const c = (Math.random()*n)|0; starAt[c] = Math.random()*6.28; stars.push(c); }
+
+  stems = F.map((f, i) => {
+    const off = (i - 5)*5, zh = -70 + .0009*f[0]*f[0] + ((i*37)%30 - 15);
+    return {f, i, d: .4 + i*.38, P: [[off,0,0],[off*.9,f[1]*.5,zh*.3],[f[0]*.8,f[1]*.78,zh*.8],[f[0],f[1],zh]],
+      M: mul(rz(-f[0]/300*.8), rx(-(.65 + (400 - f[1])/700))), rot: i*1.3, hue: (i*29)%20};
+  });
+  blades = Array.from({length: 10}, (_, i) => ({beta: i*.63, L: 150 + (i*37)%70, p0: .12 + (i%3)*.12, ox: (i-5)*4, d: .9 + i*.18}));
+  TW = stems[10].d + STEM_T + BLOOM_T*.85; TR = TW + 5.4;
+}
+
+function put(x, y, z, nx, ny, nz, r, g, b) {
+  const m = LM, w = WR;
+  x *= CS; y *= CS; z *= CS;
+  const X = m[0]*x + m[1]*y + m[2]*z + LP[0], Y = m[3]*x + m[4]*y + m[5]*z + LP[1] - YC, Z = m[6]*x + m[7]*y + m[8]*z + LP[2];
+  const zc = w[6]*X + w[7]*Y + w[8]*Z + D;                       // profundidad
+  if (zc < 100) return;
+  const p = D/zc*SC;                                              // perspectiva: división por z
+  const col = ((W/2 - gx0 + (w[0]*X + w[1]*Y + w[2]*Z)*p)/cw)|0, row = ((PY - (w[3]*X + w[4]*Y + w[5]*Z)*p)/fs)|0;
+  if (col < 0 || col >= cols || row < 0 || row >= rows) return;
+  const i = row*cols + col;
+  if (zc >= zb[i]) return;                                        // Z-buffer
+  zb[i] = zc;
+  const a = m[0]*nx + m[1]*ny + m[2]*nz, bb = m[3]*nx + m[4]*ny + m[5]*nz, c = m[6]*nx + m[7]*ny + m[8]*nz;
+  const I = Math.abs((w[0]*a + w[1]*bb + w[2]*c)*LX + (w[3]*a + w[4]*bb + w[5]*c)*LY + (w[6]*a + w[7]*bb + w[8]*c)*LZ);
+  const sh = clamp(.15 + .85*I + .22*EM);                          // producto escalar normal·luz
+  ci[i] = 1 + ((sh*8.99)|0);
+  const k = .5 + .8*sh;
+  cr[i] = Math.min(255, r*k); cg[i] = Math.min(255, g*k); cb[i] = Math.min(255, b*k);
+}
+const dens = len => Math.max(3, Math.ceil(len*SC/(cw*.8)));
+
+function blade(beta, L, Wd, p0, k, cup, colf) {
+  if (L < 2) return;
+  const cbt = Math.cos(beta), sbt = Math.sin(beta), kk = k + .02, nu = dens(L), nv = dens(Wd);
+  for (let a = 0; a <= nu; a++) {
+    const u = a/nu, ph = p0 + k*u;
+    const rr = L*(Math.cos(p0) - Math.cos(ph))/kk, aa = L*(Math.sin(ph) - Math.sin(p0))/kk;
+    const nr = -Math.cos(ph), na = Math.sin(ph), w = Wd*Math.pow(Math.sin(Math.PI*Math.pow(u,.8)), .8);
+    for (let c = -nv; c <= nv; c++) {
+      const v = c/nv, wv = v*w, off = cup*.4*w*v*v;
+      const rad = rr + nr*off, ay = aa + na*off;
+      colf(u, v);
+      put(rad*cbt - wv*sbt, ay, rad*sbt + wv*cbt, nr*cbt, na, nr*sbt, COLR, COLG, COLB);
+    }
+  }
+}
+const mix = (c, t, r, g, b) => { COLR = lerp(COLR, r, t); COLG = lerp(COLG, g, t); COLB = lerp(COLB, b, t); };
+const leafCol = (u, v) => { COLR = 32 + 45*u; COLG = 95 + 85*u - 20*Math.abs(v); COLB = 40 + 25*u; };
+
+function lily(st, b, size) {
+  const pal = st.f[3];
+  for (let k = 0; k < 6; k++) {
+    const inner = k & 1, o = ob(b, inner ? .14 : 0, .62);
+    const colf = (u, v) => {
+      COLR = pal[0]; COLG = pal[1]; COLB = pal[2];
+      mix(0, clamp(1 - u*3.5)*.85, 225, 215, 90);                    
+      mix(0, u*u*u*.22, 255, 250, 245);                             
+      if (Math.abs(v) < .07) mix(0, .22, 40, 10, 10);          
+      if (u > .2 && u < .75 && Math.sin(u*55 + k)*Math.sin(v*30 + u*9) > .93) mix(0, .7, 90, 15, 40);   // pecas
+      mix(0, (1 - clamp(o*3))*.6, 130, 190, 110);                       // capullo verdoso
+    };
+    blade(k*Math.PI/3 + st.rot, (66 - inner*8)*1, (23 - inner*3)*(.6 + .4*o), lerp(.05,.95,o) - inner*.08, lerp(.04,1.55,o), lerp(1.2,.35,o), colf);
+  }
+  const o = ob(b, .3, .5);
+  if (o > 0) for (let k = 0; k < 6; k++) { const ang = k*Math.PI/3 + .3;
+    for (let t = 0; t <= 6; t++) { const q = t/6, rr = 24*o*q, yy = 42*(q - .3*q*q)*(.4 + .6*o);
+      const an = t === 6;
+      put(Math.cos(ang)*rr, yy, Math.sin(ang)*rr, Math.cos(ang), 0, Math.sin(ang), an ? 205 : 235, an ? 85 : 235, an ? 30 : 190); } }
+}
+
+function cone(az0, az1, r0, r1, Hc, scal) {
+  const na = dens((az1 - az0)*r1*.9), nh = dens(Hc), dr = r1 - r0, ln = Math.hypot(1, dr/Hc);
+  for (let a = 0; a <= na; a++) {
+    const az = lerp(az0, az1, a/na), top = Hc*(1 + (scal ? .04*Math.sin(az*13) : 0));
+    const ang = az + .5*Math.cos(az*11), nx = Math.cos(ang), nz = Math.sin(ang);
+    for (let h = 0; h <= nh; h++) {
+      const t = h/nh, y = t*top, rho = lerp(r0, r1, t) + 2.5*Math.sin(az*11)*t;
+      const A = az*r1*.9/9, Hh = y/9, fa = A - Math.floor(A), fh = Hh - Math.floor(Hh), q = (fa - .5)**2 + (fh - .5)**2;
+      const par = (Math.floor(A) + Math.floor(Hh)) & 1;
+      let r = 240, g = 243, b = 250;                                    // papel blanco con detalles azules
+      if (!par && q < .16) { r = 50; g = 100; b = 215; } else if (par && q < .05) { r = 125; g = 175; b = 240; }
+      put(rho*Math.cos(az), y, rho*Math.sin(az), nx/ln, -dr/Hc/ln, nz/ln, r, g, b);
+    }
+  }
+}
+
+function paperGroup(T, delay, sx, spin, args) {
+  const g = ease(clamp((T - delay)/2.2)); if (g <= 0) return;
+  LM = rz(spin*(1 - g)); LP = [lerp(sx, 0, g), Math.sin(g*Math.PI)*70, 0]; CS = lerp(.35, 1, g);
+  cone(...args); LM = I3; LP = [0,0,0]; CS = 1;
+}
+
+function scene(T) {
+  const sg = 1 - clamp((T - TW - 1.8)/1.6), pg = .35*clamp((T - TW - 2)/2.5);
+  heads = [];
+  EM = pg;
+  paperGroup(T, TW, -420, 1.6, [-.25, Math.PI + .25, 18, 160, 400, 1]);          // envoltura trasera
+  paperGroup(T, TW + 1.4, 420, -1.4, [Math.PI + .15, 2*Math.PI - .15, 18, 85, 150, 0]);   // envoltura frontal
+
+  EM = sg;                                                                         // los tallos brillan hasta que se cubren
+  blades.forEach(bl => { const g = ease(clamp((T - bl.d)/2.2)); LP = [bl.ox, 0, 0];
+    blade(bl.beta, bl.L*g, 9, bl.p0, .5, .5, leafCol); });
+  stems.forEach(s => {
+    const g = ease(clamp((T - s.d)/STEM_T)); if (g <= 0) return;
+    const P = s.P, bz = t => { const u = 1 - t, a = u*u*u, b = 3*u*u*t, c = 3*u*t*t, d = t*t*t;
+      return [0,1,2].map(j => a*P[0][j] + b*P[1][j] + c*P[2][j] + d*P[3][j]); };
+    LM = I3; LP = [0,0,0];
+    const n = Math.max(3, Math.ceil(g*dens(s.f[1])));
+    for (let i = 0; i <= n; i++) { const q = bz(g*i/n);
+      for (let a = 0; a < 4; a++) { const an = a*1.57, cx = Math.cos(an), sz = Math.sin(an);
+        put(q[0] + cx*2.6, q[1], q[2] + sz*2.6, cx, 0, sz, 55 + s.hue, 140 + s.hue*2, 60); } }
+    [.25,.4,.55].forEach((u, j) => { const lg = ease(clamp((g - u)/.22)); if (lg <= 0) return;
+      LP = bz(u); blade((s.i*1.9 + j*2.3), 70*lg, 11, .55, .7, .6, leafCol); });
+    const bs = clamp((g - .85)/.15);
+    if (bs > 0) { const b = clamp((T - s.d - STEM_T)/BLOOM_T), q = bz(g);
+      EM = 1; LM = s.M; LP = q; CS = s.f[2]*(.45 + .55*bs)*(.75 + .25*easeIO(b));
+      lily(s, b, s.f[2]);
+      heads.push({q: [q[0] + s.M[1]*28*CS, q[1] + s.M[4]*28*CS, q[2] + s.M[7]*28*CS], r: 85*CS, b, c: s.f[3]});
+      LM = I3; LP = [0,0,0]; CS = 1; EM = sg; }
+  });
+
+  EM = pg;                                                                         // cinta y moño
+  const gR = clamp((T - TW - 3.6)/1.1);
+  if (gR > 0) {
+    const rho = 58, y0 = 80, na = dens(rho*6), nh = 4;
+    for (let a = 0; a <= na; a++) { const az = -Math.PI/2 + lerp(-Math.PI, Math.PI, a/na)*ease(gR);
+      for (let h = 0; h <= nh; h++) put(rho*Math.cos(az), y0 - 8 + h*4, rho*Math.sin(az), Math.cos(az), 0, Math.sin(az), 235, 90, 130); }
+    const bg = clamp((T - TW - 4.5)/1);
+    if (bg > 0) {
+      CS = pop(bg); LP = [0, y0, -rho - 3];
+      for (const m of [1, -1]) {
+        for (let a = 0; a < 16; a++) for (let r = 0; r <= 5; r++) { const q = r/5, an = a/16*6.283, ex = 24*q*Math.cos(an), ey = 11*q*Math.sin(an);
+          put(m*(12 + ex*.95), ey + .3*m*ex, 0, 0, 0, -1, q < .25 ? 190 : 240, q < .25 ? 50 : 95, q < .25 ? 95 : 135); }
+        for (let u = 0; u <= 10; u++) for (let w = -1; w <= 1; w++) { const q = u/10;
+          put(m*(4 + 16*q) + w*3.5, -(8 + 52*q), -1, 0, 0, -1, 225, 80, 120); }
+      }
+      for (let a = 0; a < 10; a++) put(Math.cos(a*.63)*6, Math.sin(a*.63)*6, -3, 0, 0, -1, 200, 60, 100);
+      CS = 1; LP = [0,0,0];
+    }
+  }
+}
+
+const HX = [], hx = k => HX[k] || (HX[k] = ('00' + k.toString(16)).slice(-3));
+const q4 = (r, g, b) => ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+
+function halos() {
+  const w = WR;
+  heads.forEach(h => {
+    const X = h.q[0], Y = h.q[1] - YC, Z = h.q[2];
+    const zc = w[6]*X + w[7]*Y + w[8]*Z + D, p = D/zc*SC;
+    const cc = (W/2 - gx0 + (w[0]*X + w[1]*Y + w[2]*Z)*p)/cw, rc = (PY - (w[3]*X + w[4]*Y + w[5]*Z)*p)/fs;
+    const rx_ = h.r*p*2.4/cw, ry_ = h.r*p*2.4/fs;
+    for (let y = Math.max(0, rc - ry_|0); y < Math.min(rows, rc + ry_); y++)
+      for (let x = Math.max(0, cc - rx_|0); x < Math.min(cols, cc + rx_); x++) {
+        const i = y*cols + x; if (zb[i] < 1e8) continue;
+        const d = Math.hypot((x - cc)/rx_, (y - rc)/ry_); if (d >= 1) continue;
+        const a = (1 - d)*(1 - d)*h.b*.9; if (a <= .12 || a <= ha[i]) continue;
+        ha[i] = a; hk[i] = 1 + q4(h.c[0]*a, h.c[1]*a, h.c[2]*a);
+      }
+  });
+}
+
+function render(t, T) {
+  zb.fill(1e9); ha.fill(0); hk.fill(0);
+  WR = mul(rx(.1*Math.sin(t*.23) - .05), ry(.9*Math.sin(t*.32)));
+  if (T >= 0) { scene(T); halos(); }
+  let out = '';
+  for (let r = 0; r < rows; r++) {
+    let run = '', cur = -1;
+    for (let c = 0; c < cols; c++) {
+      const i = r*cols + c; let ch = ' ', key = -1;
+      if (zb[i] < 1e8) { ch = RAMP[ci[i]]; key = q4(cr[i], cg[i], cb[i]); }
+      else if (hk[i]) { ch = '.'; key = hk[i] - 1; }
+      else if (starAt[i] >= 0) { const v = 4 + ((Math.sin(t*1.4 + starAt[i])*.5 + .5)*11)|0; ch = '.'; key = (v << 8) | (v << 4) | v; }
+      if (key !== cur) { if (run) out += cur < 0 ? run : `<span style="color:#${hx(cur)}">${run}</span>`; run = ''; cur = key; }
+      run += ch;
+    }
+    if (run) out += cur < 0 ? run : `<span style="color:#${hx(cur)}">${run}</span>`;
+    out += '\n';
+  }
+  pre.innerHTML = out;
+  if (T > TR - 1 && !msg.classList.contains('on')) { msg.textContent = DEDICATORIA; msg.classList.add('on'); }
+}
+
+let last = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (now - last < 33) return; last = now;
+  render(now/1000, started ? (now - T0)/1000 : -1);
+}
+
+const startEl = document.getElementById('start'), musBtn = document.getElementById('mus');
+startEl.addEventListener('click', () => { started = true; T0 = performance.now(); startEl.classList.add('off'); aud.currentTime = 0; aud.play().catch(() => {}); });
+document.getElementById('rep').addEventListener('click', () => { msg.classList.remove('on'); build(); T0 = performance.now(); started = true; });
+musBtn.addEventListener('click', () => { if (aud.paused) { aud.play().catch(() => {}); musBtn.textContent = '♪'; } else { aud.pause(); musBtn.textContent = '✕'; } });
+addEventListener('resize', build);
+build(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
